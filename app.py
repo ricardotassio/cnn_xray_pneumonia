@@ -1,10 +1,19 @@
 import io
 import os
 import pickle
+import sys
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Tuple, Union, Optional
 
 import streamlit as st
+
+# ---- NEW: remote loading ----
+try:
+    import requests
+    import_requests = True
+except ImportError:
+    import_requests = False
 
 # Lazy imports to avoid startup issues
 try:
@@ -24,17 +33,25 @@ try:
     import_sklearn = True
 except ImportError:
     import_sklearn = False
-
+luist = [
+    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/knn_(hog).pkl",
+    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/svm_(hog).pkl",
+    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/logreg_(cnnfeat).pkl",
+    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/rf_(cnnfeat).pkl",
+]
 # -----------------------------
 # Constants and utilities
 # -----------------------------
 APP_TITLE = "Chest X-Ray Pneumonia — Traditional Models (Pickle)"
 IMG_SIZE = (224, 224)
 
+# ---- NEW: your S3 base URL ----
+S3_BASE_URL = "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/"
 
 def artifacts_dir() -> str:
     """
     Resolve ./artifacts relative to this file if available; otherwise cwd/artifacts.
+    (Still used only to list model names locally if present.)
     """
     try:
         base = Path(__file__).parent
@@ -44,6 +61,98 @@ def artifacts_dir() -> str:
 
 
 def list_pickles_by_family(art_dir: str) -> Dict[str, List[str]]:
+    """
+    Build groups from S3 (via S3_BASE_URL ?list-type=2) or, if that fails,
+    from the global array `luist`. Returns {'hog': [...], 'cnnfeat': [...]}.
+    """
+    groups = {"hog": [], "cnnfeat": []}
+    names = []
+
+    # --- Try listing directly from S3 (public ListBucket must be allowed) ---
+    try:
+        import requests
+        import xml.etree.ElementTree as ET
+
+        base = S3_BASE_URL.rstrip("/") + "/"
+        url = base + "?list-type=2&max-keys=1000"
+        r = requests.get(url, timeout=30)
+        if r.ok:
+            root = ET.fromstring(r.text)
+            # Works with any namespace
+            keys = [el.text for el in root.findall(".//{*}Contents/{*}Key")]
+            names = [
+                os.path.basename(k)
+                for k in keys
+                if isinstance(k, str) and k.lower().endswith(".pkl")
+            ]
+    except Exception:
+        # ignore & fall back
+        names = []
+
+    # --- Fallback to `luist` (filenames or full URLs) ---
+    if not names:
+        try:
+            raw = luist  # must exist elsewhere: e.g., ['knn_(hog).pkl', 'rf_(cnnfeat).pkl', ...]
+        except NameError:
+            raw = []
+        seen = set()
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            name = os.path.basename(item)
+            if name.lower().endswith(".pkl") and name not in seen:
+                seen.add(name)
+                names.append(name)
+
+    # Stable order
+    names = sorted(names)
+
+    # Group by family keyword
+    for name in names:
+        lower = name.lower()
+        if "hog" in lower:
+            groups["hog"].append(name)
+        elif "cnnfeat" in lower or "cnn" in lower:
+            groups["cnnfeat"].append(name)
+
+    return groups
+
+    """
+    Build the model list from the global array `luist`.
+    Each entry can be just a filename (e.g., 'knn_(hog).pkl') or a full URL.
+    Groups by 'hog' and 'cnnfeat' (also accepts 'cnn' in the name).
+    """
+    groups = {"hog": [], "cnnfeat": []}
+
+    # If `luist` isn't defined, return empty groups gracefully
+    try:
+        raw = luist  # must be defined elsewhere, e.g., luist = ['knn_(hog).pkl', ...]
+    except NameError:
+        return groups
+
+    # Normalize entries to basenames and keep original order (dedup)
+    seen = set()
+    names: List[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        name = os.path.basename(item)
+        if not name.lower().endswith(".pkl"):
+            continue
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+
+    # Group by family based on substring
+    for name in names:
+        lower = name.lower()
+        if "hog" in lower:
+            groups["hog"].append(name)
+        elif "cnnfeat" in lower or "cnn" in lower:
+            groups["cnnfeat"].append(name)
+
+    return groups
+
     """Return available .pkl files grouped by feature family (hog, cnnfeat)."""
     groups = {"hog": [], "cnnfeat": []}
     if not os.path.isdir(art_dir):
@@ -106,6 +215,45 @@ def load_pickle_model(pkl_path: str) -> BaseEstimator:
     return est
 
 
+# ---- NEW: download & cache from S3, then reuse the same loader ----
+@st.cache_resource(show_spinner=False)
+def load_pickle_model_from_url(url: str) -> BaseEstimator:
+    if not import_requests:
+        st.error("❌ Package 'requests' not found. Run: `pip install requests`")
+        st.stop()
+
+    # stream to temp file with a progress bar
+    with requests.get(url, stream=True, timeout=180) as r:
+        try:
+            r.raise_for_status()
+        except Exception as e:
+            st.error(f"Failed to download model from S3.\nURL: {url}\nDetails: {e}")
+            st.stop()
+
+        total = int(r.headers.get("content-length", 0))
+        done = 0
+        prog = st.progress(0)
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            for chunk in r.iter_content(1024 * 1024):
+                if chunk:
+                    tmp.write(chunk)
+                    if total:
+                        done += len(chunk)
+                        prog.progress(min(int(done / total * 100), 100))
+            tmp_path = tmp.name
+
+        prog.empty()
+
+    try:
+        return load_pickle_model(tmp_path)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+
 def load_image(file: Union[bytes, io.BytesIO, Image.Image]) -> Image.Image:
     if isinstance(file, Image.Image):
         img = file
@@ -160,7 +308,6 @@ def get_efficientnet_b0_feature_extractor():
         input_shape=(IMG_SIZE[1], IMG_SIZE[0], 3),
         pooling="avg",
     )
-    # Access preprocess function through tf module to avoid direct import resolution issues
     preprocess_input = tf.keras.applications.efficientnet.preprocess_input
     return base, preprocess_input
 
@@ -225,10 +372,9 @@ st.title(APP_TITLE)
 st.caption("Upload a chest X-ray and classify it as Normal or Pneumonia using saved scikit-learn models.")
 
 # Debug info
-import sys
 st.sidebar.markdown("**Debug Info:**")
 st.sidebar.text(f"Python: {sys.executable}")
-st.sidebar.text(f"Versão: {sys.version.split()[0]}")
+st.sidebar.text(f"Version: {sys.version.split()[0]}")
 
 # Check required imports
 missing_imports = []
@@ -238,18 +384,24 @@ if not import_pil:
     missing_imports.append("pillow")
 if not import_sklearn:
     missing_imports.append("scikit-learn")
+if not import_requests:
+    missing_imports.append("requests")
 
 if missing_imports:
-    st.error(f"❌ Pacotes necessários não encontrados: {', '.join(missing_imports)}")
-    st.info("Execute: `pip install " + " ".join(missing_imports) + "`")
+    st.error(f"❌ Missing packages: {', '.join(missing_imports)}")
+    st.info("Run: `pip install " + " ".join(missing_imports) + "`")
     st.stop()
 
+# Model discovery (still by local names for the selector;
+# the actual load will use S3_BASE_URL + selected filename)
 art_dir = artifacts_dir()
 groups = list_pickles_by_family(art_dir)
 
 available_families = [opt for opt in ("hog", "cnnfeat") if groups[opt]]
 if not available_families:
-    st.warning("No .pkl models found in artifacts/. Please add the pickled models.")
+    st.warning("No .pkl models found locally in artifacts/. "
+               "You can still run by adding at least placeholder files to list names, "
+               "or adjust the code to provide a static list of remote filenames.")
     st.stop()
 
 family = st.sidebar.radio(
@@ -278,9 +430,10 @@ with col_action:
     do_predict = st.button("Predict", use_container_width=True, disabled=(uploaded is None or not model_name))
 
 if do_predict and uploaded is not None and model_name:
-    pkl_path = os.path.join(art_dir, model_name)
-    with st.spinner("Loading model…"):
-        est = load_pickle_model(pkl_path)
+    # ---- NEW: build S3 URL and load remotely ----
+    pkl_url = S3_BASE_URL.rstrip("/") + "/" + model_name  # e.g., .../knn_(hog).pkl
+    with st.spinner(f"Downloading model from S3…\n{pkl_url}"):
+        est = load_pickle_model_from_url(pkl_url)
 
     img = load_image(uploaded)
 
