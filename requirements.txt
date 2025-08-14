@@ -1,3 +1,7 @@
+# --- TensorFlow para Python 3.13 ---
+tf-nightly
+
+# --- seu stack ---
 altair==5.5.0
 attrs==25.3.0
 blinker==1.9.0
@@ -17,11 +21,13 @@ lazy_loader==0.4
 MarkupSafe==3.0.2
 narwhals==2.1.1
 networkx==3.5
-numpy==2.3.2
+# deixe o TF decidir a versão compatível:
+numpy
 packaging==25.0
 pandas==2.3.1
 pillow==11.3.0
-protobuf==6.31.1
+# deixe o TF decidir a versão compatível:
+protobuf
 pyarrow==21.0.0
 pydeck==0.9.1
 python-dateutil==2.9.0.post0
