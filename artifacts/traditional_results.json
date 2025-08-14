@@ -1,0 +1,42 @@
+[
+  {
+    "name": "LR (HOG)",
+    "val_ap": 1.0,
+    "test_ap": 0.9598194239199043
+  },
+  {
+    "name": "Linear SVM (HOG)",
+    "val_ap": 1.0,
+    "test_ap": 0.9602837984992378
+  },
+  {
+    "name": "Random Forest (HOG)",
+    "val_ap": 1.0,
+    "test_ap": 0.9481793551012393
+  },
+  {
+    "name": "KNN (HOG)",
+    "val_ap": 1.0,
+    "test_ap": 0.9113084421967896
+  },
+  {
+    "name": "LR (CNNfeat)",
+    "val_ap": 0.9089285714285714,
+    "test_ap": 0.9279747968096164
+  },
+  {
+    "name": "Linear SVM (CNNfeat)",
+    "val_ap": 0.9128787878787878,
+    "test_ap": 0.8864551408381994
+  },
+  {
+    "name": "Random Forest (CNNfeat)",
+    "val_ap": 0.8751984126984127,
+    "test_ap": 0.9314580685308887
+  },
+  {
+    "name": "KNN (CNNfeat)",
+    "val_ap": 0.6863906926406926,
+    "test_ap": 0.8910354896167945
+  }
+]
