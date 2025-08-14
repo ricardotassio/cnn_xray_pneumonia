@@ -36,8 +36,11 @@ except ImportError:
 luist = [
     "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/knn_(hog).pkl",
     "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/svm_(hog).pkl",
-    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/logreg_(cnnfeat).pkl",
-    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/rf_(cnnfeat).pkl",
+    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/lr_(cnnfeat).pkl",
+    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/lr_(hog).pkl",
+    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/andom_forest_(cnnfeat).pkl",
+    "https://xrayprojectv1.s3.ca-central-1.amazonaws.com/random_forest_(hog).pkl",
+
 ]
 # -----------------------------
 # Constants and utilities
